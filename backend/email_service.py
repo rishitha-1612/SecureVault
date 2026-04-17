@@ -35,7 +35,7 @@ APP_NAME        = "SecureVault"
 
 # ── Shared CSS ────────────────────────────────────────────────────────────────
 _BASE_STYLE = """
-  body{margin:0;padding:0;background:#0f0f1a;font-family:'Segoe UI',Arial,sans-serif;}
+  body{margin:0;padding:0;background:#0f0f1a;font-family:'Inter','Segoe UI',Arial,sans-serif;}
   .wrap{max-width:560px;margin:32px auto;background:#1a1a2e;border-radius:14px;
         overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,.6);}
   .header{padding:28px 32px;background:linear-gradient(135deg,#0f3460,#16213e);}
@@ -157,6 +157,46 @@ def _send(msg: MIMEMultipart, receiver: str) -> bool:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+def _resolve_image_attachment(image_path: str | None) -> Path | None:
+    if not image_path:
+        return None
+
+    path = Path(image_path)
+    if not path.exists() or not path.is_file():
+        logger.warning("Intruder image attachment missing on disk: %s", image_path)
+        return None
+
+    return path
+
+
+def _attach_image(msg: MIMEMultipart, image_path: str | None) -> bool:
+    path = _resolve_image_attachment(image_path)
+    if not path:
+        return False
+
+    try:
+        image_bytes = path.read_bytes()
+        if not image_bytes:
+            logger.warning("Intruder image attachment is empty: %s", image_path)
+            return False
+
+        subtype = path.suffix.lower().lstrip(".")
+        if subtype == "jpg":
+            subtype = "jpeg"
+
+        if subtype:
+            img_part = MIMEImage(image_bytes, _subtype=subtype, name=path.name)
+        else:
+            img_part = MIMEImage(image_bytes, name=path.name)
+
+        img_part.add_header("Content-Disposition", "attachment", filename=path.name)
+        msg.attach(img_part)
+        return True
+    except Exception as exc:
+        logger.error("Failed to attach intruder image %s: %s", image_path, exc)
+        return False
+
+
 def send_otp_email(receiver: str, username: str, otp: str) -> bool:
     msg             = MIMEMultipart("alternative")
     msg["From"]     = SENDER_EMAIL
@@ -187,7 +227,8 @@ def send_otp_email(receiver: str, username: str, otp: str) -> bool:
 
 def send_intruder_alert(receiver: str, username: str, attempt_no: int,
                         location: dict, image_path: str | None,
-                        user_agent: str = "Unknown") -> bool:
+                        user_agent: str = "Unknown",
+                        event_time: str | None = None) -> bool:
     """
     Full intruder alert email:
       - Username, time, attempt count, device/browser
@@ -200,12 +241,14 @@ def send_intruder_alert(receiver: str, username: str, attempt_no: int,
     msg["To"]       = receiver
     msg["Subject"]  = "🚨 SECURITY ALERT – Unauthorized Access Attempt"
 
-    ts = datetime.utcnow().strftime("%d %B %Y at %H:%M:%S UTC")
+    ts = event_time or datetime.utcnow().strftime("%d %B %Y at %H:%M:%S UTC")
+    attachment_path = _resolve_image_attachment(image_path)
+    location_display = location.get("display", "Unknown")
 
     photo_note = (
         '<hr class="divider">'
         '<p style="color:#aaa;font-size:13px;">📷 A photo of the intruder has been attached to this email.</p>'
-        if image_path and Path(image_path).exists() else ""
+        if attachment_path else ""
     )
 
     html = _html_wrap(
@@ -223,11 +266,13 @@ def send_intruder_alert(receiver: str, username: str, attempt_no: int,
         <table class="kv">
           <tr><td class="label">Account</td>
               <td class="value" style="color:#e94560;font-weight:700;">{username}</td></tr>
-          <tr><td class="label">Time (UTC)</td>
+          <tr><td class="label">Time</td>
               <td class="value">{ts}</td></tr>
-          <tr><td class="label">Failed Attempts</td>
+          <tr><td class="label">Location</td>
+              <td class="value">{location_display}</td></tr>
+          <tr><td class="label">Attempt Count</td>
               <td class="value" style="color:#f39c12;font-weight:600;">
-                {attempt_no} failed attempt(s)
+                {attempt_no} attempt(s)
               </td></tr>
           <tr><td class="label">Device / Browser</td>
               <td class="value" style="font-size:12px;">{user_agent[:100]}</td></tr>
@@ -256,12 +301,8 @@ def send_intruder_alert(receiver: str, username: str, attempt_no: int,
     )
     msg.attach(MIMEText(html, "html"))
 
-    if image_path and Path(image_path).exists():
-        with open(image_path, "rb") as fh:
-            img_part = MIMEImage(fh.read(), name=Path(image_path).name)
-            img_part.add_header("Content-Disposition", "attachment",
-                                filename=Path(image_path).name)
-            msg.attach(img_part)
+    if attachment_path:
+        _attach_image(msg, str(attachment_path))
 
     return _send(msg, receiver)
 

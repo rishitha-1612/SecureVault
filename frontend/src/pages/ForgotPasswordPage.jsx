@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Mail, ArrowLeft, CheckCircle, AlertCircle, Send } from 'lucide-react'
 import { authAPI } from '../api/api'
+import PageTransition from '../components/PageTransition'
 
 export default function ForgotPasswordPage() {
   const [email,   setEmail]   = useState('')
@@ -31,17 +32,13 @@ export default function ForgotPasswordPage() {
                         bg-yellow-500/5 rounded-full blur-3xl" />
       </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 32 }} animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -32 }} transition={{ duration: 0.4 }}
-        className="auth-card relative z-10"
-      >
+      <PageTransition className="auth-card relative z-10">
         <div className="flex items-center gap-3 mb-8">
           <Link to="/login" className="p-2 rounded-lg hover:bg-vault-card transition">
             <ArrowLeft className="w-5 h-5 text-vault-muted" />
           </Link>
           <div>
-            <h1 className="text-xl font-bold">Forgot Password</h1>
+            <h1 className="text-xl font-semibold">Forgot Password</h1>
             <p className="text-sm text-vault-muted">We'll send a reset link to your email</p>
           </div>
         </div>
@@ -58,7 +55,7 @@ export default function ForgotPasswordPage() {
               you'll receive a password reset link shortly.
             </p>
             <p className="text-xs text-vault-muted mb-6">
-              The link expires in <strong>1 hour</strong>.
+              The link expires in <strong>10 minutes</strong>.
               Check your spam folder if you don't see it.
             </p>
             <Link to="/login"
@@ -98,7 +95,7 @@ export default function ForgotPasswordPage() {
             </motion.button>
           </form>
         )}
-      </motion.div>
+      </PageTransition>
     </div>
   )
 }

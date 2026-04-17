@@ -5,21 +5,21 @@ export default {
     extend: {
       colors: {
         vault: {
-          bg:        '#0d0d1a',
-          panel:     '#12122a',
-          card:      '#1a1a35',
-          border:    '#2a2a50',
-          accent:    '#6c63ff',
-          accent2:   '#e94560',
-          success:   '#2ecc71',
-          warning:   '#f39c12',
-          muted:     '#6b7280',
-          text:      '#e2e2f0',
+          bg: '#03050b',
+          panel: '#081120',
+          card: '#10192e',
+          border: '#22314f',
+          accent: '#4f8cff',
+          accent2: '#8d6bff',
+          success: '#3ce2a1',
+          warning: '#ffb84d',
+          muted: '#8b9bb5',
+          text: '#ecf3ff',
         },
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
-        mono: ['JetBrains Mono', 'monospace'],
+        mono: ['Inter', 'system-ui', 'sans-serif'],
       },
       animation: {
         'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',

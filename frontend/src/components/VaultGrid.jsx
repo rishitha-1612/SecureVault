@@ -1,12 +1,14 @@
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, LayoutGroup, motion } from 'framer-motion'
 
-export default function VaultGrid({ children }) {
+export default function VaultGrid({ children, className = '' }) {
   return (
-    <motion.div
-      layout
-      className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-    >
-      <AnimatePresence mode="popLayout">{children}</AnimatePresence>
-    </motion.div>
+    <LayoutGroup>
+      <motion.div
+        layout
+        className={`vault-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 ${className}`}
+      >
+        <AnimatePresence mode="popLayout">{children}</AnimatePresence>
+      </motion.div>
+    </LayoutGroup>
   )
 }

@@ -1,10 +1,39 @@
-const CACHE_NAME = 'securevault-app-v1'
+const CACHE_NAME = 'securevault-app-v3'
 const APP_SHELL = [
   '/',
-  '/login',
-  '/manifest.webmanifest',
+  '/manifest.json',
+  '/icon-192.png',
+  '/icon-512.png',
   '/securevault-icon.svg',
 ]
+
+async function networkFirst(request, fallbackUrl) {
+  try {
+    const response = await fetch(request)
+    const cache = await caches.open(CACHE_NAME)
+    cache.put(request, response.clone())
+    return response
+  } catch {
+    const cached = await caches.match(request)
+    if (cached) return cached
+    return caches.match(fallbackUrl)
+  }
+}
+
+async function staleWhileRevalidate(request) {
+  const cache = await caches.open(CACHE_NAME)
+  const cached = await cache.match(request)
+  const network = fetch(request)
+    .then((response) => {
+      if (response.ok) {
+        cache.put(request, response.clone())
+      }
+      return response
+    })
+    .catch(() => cached)
+
+  return cached || network
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -28,22 +57,14 @@ self.addEventListener('fetch', (event) => {
   const request = event.request
   const url = new URL(request.url)
 
-  if (request.method !== 'GET' || url.pathname.startsWith('/api/')) {
+  if (request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) {
     return
   }
 
   if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request).catch(() => caches.match('/login')),
-    )
+    event.respondWith(networkFirst(request, '/'))
     return
   }
 
-  event.respondWith(
-    caches.match(request).then((cached) => cached || fetch(request).then((response) => {
-      const copy = response.clone()
-      caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
-      return response
-    })),
-  )
+  event.respondWith(staleWhileRevalidate(request))
 })

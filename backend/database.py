@@ -171,6 +171,29 @@ def log_attempt(username: str, status: str, stage: str = None,
         )
 
 
+def update_attempt_image(username: str, stage: str, attempt_no: int,
+                         image_path: str) -> None:
+    if not image_path:
+        return
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE login_attempts
+               SET image_path = ?
+             WHERE id = (
+                SELECT id
+                  FROM login_attempts
+                 WHERE username = ?
+                   AND stage = ?
+                   AND attempt_no = ?
+                 ORDER BY id DESC
+                 LIMIT 1
+             )
+            """,
+            (image_path, username, stage, attempt_no)
+        )
+
+
 def get_recent_attempts(username: str, limit: int = 20) -> list:
     with get_connection() as conn:
         rows = conn.execute(

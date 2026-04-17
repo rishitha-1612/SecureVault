@@ -19,7 +19,8 @@ import {
 } from 'lucide-react'
 import { authAPI } from '../api/api'
 import { useAuth } from '../context/AuthContext'
-import { withBrowserLocation } from '../utils/securityCapture'
+import { primeBrowserLocation, withBrowserLocation } from '../utils/securityCapture'
+import PageTransition from '../components/PageTransition'
 
 const MAX_ATTEMPTS = 3
 
@@ -40,33 +41,98 @@ export default function LoginPage() {
   const videoRef    = useRef(null)
   const streamRef   = useRef(null)
   const countdownId = useRef(null)
+  const frameWaitId = useRef(null)
 
-  const onChange = (e) => setForm(f => ({ ...f, [e.target.name]: e.target.value }))
+  const clearCountdown = useCallback(() => {
+    if (countdownId.current) {
+      clearInterval(countdownId.current)
+      countdownId.current = null
+    }
+  }, [])
+
+  const onChange = (e) => {
+    const { name, value } = e.target
+    const usernameChanged = name === 'username' && form.username !== value
+
+    setForm((current) => ({ ...current, [name]: value }))
+    setError('')
+
+    if (usernameChanged) {
+      clearCountdown()
+      setAttemptsLeft(MAX_ATTEMPTS)
+      setIsLocked(false)
+      setLockCountdown(0)
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop())
+        streamRef.current = null
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null
+      }
+      setCamReady(false)
+    }
+  }
 
   // ── Webcam helpers ────────────────────────────────────────────────────────
+
+  const waitForVideoFrame = useCallback(() => new Promise((resolve) => {
+    const startedAt = Date.now()
+
+    const checkFrame = () => {
+      const video = videoRef.current
+      if (video && video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+        frameWaitId.current = null
+        resolve(true)
+        return
+      }
+
+      if (Date.now() - startedAt >= 1200) {
+        frameWaitId.current = null
+        resolve(false)
+        return
+      }
+
+      frameWaitId.current = window.requestAnimationFrame(checkFrame)
+    }
+
+    checkFrame()
+  }), [])
 
   /** Open the webcam silently (user won't see the feed). */
   const startWebcam = useCallback(async () => {
     if (streamRef.current) return    // already open
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCamReady(false)
+      return
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: 'user' },
+        video: {
+          width: { ideal: 320 },
+          height: { ideal: 240 },
+          facingMode: 'user',
+        },
         audio: false,
       })
       streamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
-        await videoRef.current.play()
+        await videoRef.current.play().catch(() => undefined)
       }
-      setCamReady(true)
+      const ready = await waitForVideoFrame()
+      setCamReady(ready)
     } catch {
       // Webcam unavailable – non-fatal, request proceeds without image
       setCamReady(false)
     }
-  }, [])
+  }, [waitForVideoFrame])
 
   /** Stop and release the webcam. */
   const stopWebcam = useCallback(() => {
+    if (frameWaitId.current) {
+      window.cancelAnimationFrame(frameWaitId.current)
+      frameWaitId.current = null
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop())
       streamRef.current = null
@@ -80,9 +146,11 @@ export default function LoginPage() {
     if (!videoRef.current || !streamRef.current) return null
     try {
       const canvas = document.createElement('canvas')
-      canvas.width  = videoRef.current.videoWidth  || 640
-      canvas.height = videoRef.current.videoHeight || 480
-      canvas.getContext('2d').drawImage(videoRef.current, 0, 0)
+      canvas.width  = 320
+      canvas.height = 240
+      const context = canvas.getContext('2d')
+      if (!context) return null
+      context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height)
       return canvas.toDataURL('image/jpeg', 0.85)
     } catch {
       return null
@@ -90,20 +158,24 @@ export default function LoginPage() {
   }, [])
 
   // Clean up webcam on unmount
-  useEffect(() => () => {
-    stopWebcam()
-    if (countdownId.current) clearInterval(countdownId.current)
-  }, [stopWebcam])
+  useEffect(() => {
+    primeBrowserLocation()
+    return () => {
+      stopWebcam()
+      clearCountdown()
+    }
+  }, [clearCountdown, stopWebcam])
 
   // ── Lockout countdown ─────────────────────────────────────────────────────
 
   const startCountdown = useCallback((seconds) => {
+    clearCountdown()
     setLockCountdown(seconds)
     setIsLocked(true)
-    countdownId.current = setInterval(() => {
+    countdownId.current = window.setInterval(() => {
       setLockCountdown(prev => {
         if (prev <= 1) {
-          clearInterval(countdownId.current)
+          clearCountdown()
           setIsLocked(false)
           setAttemptsLeft(MAX_ATTEMPTS)
           setError('')
@@ -112,7 +184,7 @@ export default function LoginPage() {
         return prev - 1
       })
     }, 1000)
-  }, [])
+  }, [clearCountdown])
 
   // ── Submit handler ────────────────────────────────────────────────────────
 
@@ -127,9 +199,8 @@ export default function LoginPage() {
     const isLastAttempt = attemptsLeft === 1
     if (isLastAttempt) {
       if (!camReady) await startWebcam()
-      // Give the camera a moment to produce a real frame
-      await new Promise(r => setTimeout(r, 400))
-      intruderImage = captureFrame()
+      const frameReady = await waitForVideoFrame()
+      intruderImage = frameReady ? captureFrame() : null
     }
 
     try {
@@ -139,6 +210,7 @@ export default function LoginPage() {
       const res = await authAPI.login(payload)
 
       // ── Success ────────────────────────────────────────────────────────────
+      clearCountdown()
       stopWebcam()
       setSessionId(res.data.session_id)
       if (res.data.location) setLocation(res.data.location)
@@ -153,6 +225,7 @@ export default function LoginPage() {
         const match = detail.match(/(\d+)\s*second/)
         const secs  = match ? parseInt(match[1], 10) : 30
         stopWebcam()
+        setAttemptsLeft(0)
         setError(detail)
         startCountdown(secs)
       } else {
@@ -179,25 +252,15 @@ export default function LoginPage() {
       : 'bg-red-500'
 
   return (
-    /* auth-page already has position:relative; z-index is added inline */
-    <div className="auth-page" style={{ position: 'relative', zIndex: 10 }}>
-      {/* Hidden video element for silent webcam capture */}
+    <div className="auth-page">
       <video
         ref={videoRef}
         muted
         playsInline
-        style={{ position: 'absolute', opacity: 0, pointerEvents: 'none',
-                 width: 1, height: 1, top: 0, left: 0 }}
+        className="sr-capture-video"
       />
 
-      <motion.div
-        initial={{ opacity: 0, y: 32 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -32 }}
-        transition={{ duration: 0.4, ease: 'easeOut' }}
-        className="auth-card relative z-10"
-      >
-        {/* Logo */}
+      <PageTransition className="auth-card relative z-10">
         <div className="flex flex-col items-center mb-8">
           <motion.div
             animate={{ rotate: [0, 5, -5, 0] }}
@@ -206,7 +269,7 @@ export default function LoginPage() {
           >
             <Shield className="w-10 h-10 text-vault-accent" />
           </motion.div>
-          <h1 className="text-2xl font-bold gradient-text">SecureVault</h1>
+          <h1 className="text-2xl font-semibold gradient-text">SecureVault</h1>
           <p className="text-vault-muted text-sm mt-1">Multi-Factor Authentication</p>
         </div>
 
@@ -214,7 +277,7 @@ export default function LoginPage() {
         <div className="flex items-center gap-2 mb-7">
           {['Password', 'Face', 'OTP'].map((step, i) => (
             <div key={step} className="flex items-center gap-2 flex-1">
-              <div className={`flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold
+              <div className={`flex items-center justify-center w-7 h-7 rounded-full text-xs font-semibold
                 ${i === 0 ? 'bg-vault-accent text-white' : 'bg-vault-border text-vault-muted'}`}>
                 {i + 1}
               </div>
@@ -239,14 +302,13 @@ export default function LoginPage() {
                 <div className="font-semibold">Account Locked</div>
                 <div className="text-xs opacity-80 mt-0.5">
                   Try again in{' '}
-                  <span className="font-bold text-red-300">{lockCountdown}s</span>
+                  <span className="font-semibold text-red-300">{lockCountdown}s</span>
                   {' '}· Security alert sent to registered email
                 </div>
               </div>
               {/* Countdown arc */}
               <div className="ml-auto flex items-center justify-center w-10 h-10">
-                <Clock className="w-5 h-5 text-red-400 animate-spin"
-                  style={{ animationDuration: '3s' }} />
+                <Clock className="spin-slow w-5 h-5 text-red-400" />
               </div>
             </motion.div>
           )}
@@ -361,7 +423,7 @@ export default function LoginPage() {
             </Link>
           </span>
         </div>
-      </motion.div>
+      </PageTransition>
     </div>
   )
 }

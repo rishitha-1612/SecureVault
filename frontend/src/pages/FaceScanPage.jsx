@@ -5,29 +5,67 @@ import Webcam from 'react-webcam'
 import { ScanFace, CheckCircle, AlertCircle, Camera } from 'lucide-react'
 import { authAPI } from '../api/api'
 import { useAuth } from '../context/AuthContext'
-import { withBrowserLocation } from '../utils/securityCapture'
+import { primeBrowserLocation, withBrowserLocation } from '../utils/securityCapture'
+import PageTransition from '../components/PageTransition'
 
 export default function FaceScanPage() {
   const navigate             = useNavigate()
   const { sessionId, setLocation } = useAuth()
   const webcamRef            = useRef(null)
   const hasScannedRef        = useRef(false)
+  const frameWaitRef         = useRef(null)
+  const redirectIntervalRef  = useRef(null)
+  const blockTimeoutRef      = useRef(null)
 
   const [status,   setStatus]   = useState('idle')   // idle | scanning | success | error | blocked
   const [message,  setMessage]  = useState('')
   const [camReady, setCamReady] = useState(false)
   const [countdown, setCount]   = useState(null)
+  const [cameraKey, setCameraKey] = useState(0)
 
   // Redirect if no session
   useEffect(() => {
     if (!sessionId) navigate('/login')
   }, [sessionId, navigate])
 
+  useEffect(() => {
+    primeBrowserLocation()
+    return () => {
+      if (frameWaitRef.current) window.cancelAnimationFrame(frameWaitRef.current)
+      if (redirectIntervalRef.current) window.clearInterval(redirectIntervalRef.current)
+      if (blockTimeoutRef.current) window.clearTimeout(blockTimeoutRef.current)
+    }
+  }, [])
+
+  const waitForFirstFrame = useCallback(() => new Promise((resolve) => {
+    const startedAt = Date.now()
+
+    const checkFrame = () => {
+      const video = webcamRef.current?.video
+      if (video && video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+        frameWaitRef.current = null
+        resolve(true)
+        return
+      }
+
+      if (Date.now() - startedAt >= 1200) {
+        frameWaitRef.current = null
+        resolve(false)
+        return
+      }
+
+      frameWaitRef.current = window.requestAnimationFrame(checkFrame)
+    }
+
+    checkFrame()
+  }), [])
+
   const scan = useCallback(async () => {
-    const screenshot = webcamRef.current?.getScreenshot({ width: 640, height: 480 })
+    const screenshot = webcamRef.current?.getScreenshot({ width: 320, height: 240 })
     if (!screenshot) {
       hasScannedRef.current = false
-      setMessage('Could not capture image. Check your camera.')
+      setStatus('error')
+      setMessage('Could not capture image. Check your camera and try again.')
       return
     }
 
@@ -43,24 +81,70 @@ export default function FaceScanPage() {
       // Countdown then navigate
       let c = 3
       setCount(c)
-      const iv = setInterval(() => {
+      redirectIntervalRef.current = window.setInterval(() => {
         c--
         setCount(c)
-        if (c <= 0) { clearInterval(iv); navigate('/verify-otp') }
+        if (c <= 0) {
+          if (redirectIntervalRef.current) {
+            window.clearInterval(redirectIntervalRef.current)
+            redirectIntervalRef.current = null
+          }
+          navigate('/verify-otp')
+        }
       }, 1000)
     } catch (err) {
+      const detail = err.response?.data?.detail || 'Face scan failed. Please try again.'
+      const blocked = err.response?.status === 403
+
+      if (blocked) {
+        setStatus('blocked')
+        setMessage(detail)
+        return
+      }
+
+      hasScannedRef.current = false
       setStatus('error')
-      setMessage(err.response?.data?.detail || 'Face not recognised. Security alert sent.')
-      setTimeout(() => setStatus('blocked'), 1000)
+      setMessage(detail)
     }
   }, [sessionId, navigate, setLocation])
 
   useEffect(() => {
     if (!camReady || !sessionId || status !== 'idle' || hasScannedRef.current) return
     hasScannedRef.current = true
-    const timer = setTimeout(scan, 650)
-    return () => clearTimeout(timer)
-  }, [camReady, sessionId, scan, status])
+    let cancelled = false
+
+    const runFirstFrameScan = async () => {
+      const frameReady = await waitForFirstFrame()
+      if (cancelled) return
+      if (!frameReady) {
+        hasScannedRef.current = false
+        setStatus('error')
+        setMessage('Could not read the first camera frame. Try again.')
+        return
+      }
+      await scan()
+    }
+
+    void runFirstFrameScan()
+
+    return () => {
+      cancelled = true
+      if (frameWaitRef.current) window.cancelAnimationFrame(frameWaitRef.current)
+    }
+  }, [camReady, sessionId, scan, status, waitForFirstFrame])
+
+  const handleCameraRetry = () => {
+    hasScannedRef.current = false
+    if (blockTimeoutRef.current) {
+      window.clearTimeout(blockTimeoutRef.current)
+      blockTimeoutRef.current = null
+    }
+    setCameraKey((value) => value + 1)
+    setCamReady(false)
+    setStatus('idle')
+    setMessage('')
+    setCount(null)
+  }
 
   const statusColor = {
     idle:     'border-vault-accent',
@@ -77,11 +161,7 @@ export default function FaceScanPage() {
                         bg-violet-500/5 rounded-full blur-3xl" />
       </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 32 }} animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -32 }} transition={{ duration: 0.4 }}
-        className="auth-card relative z-10 text-center"
-      >
+      <PageTransition className="auth-card relative z-10 text-center">
         {/* Header */}
         <motion.div
           animate={{ scale: status === 'scanning' ? [1, 1.05, 1] : 1 }}
@@ -91,7 +171,7 @@ export default function FaceScanPage() {
           <ScanFace className="w-10 h-10 text-vault-accent" />
         </motion.div>
 
-        <h1 className="text-xl font-bold mb-1">Face Verification</h1>
+        <h1 className="mb-1 text-xl font-semibold">Face Verification</h1>
         <p className="text-sm text-vault-muted mb-6">Step 2 of 3 — Look directly at your camera</p>
 
         {/* Step dots */}
@@ -104,13 +184,23 @@ export default function FaceScanPage() {
 
         {/* Webcam */}
         <div className={`relative mx-auto w-full max-w-xs rounded-2xl overflow-hidden
-                        border-2 ${statusColor} transition-colors duration-500 mb-6 bg-black`}
-          style={{ aspectRatio: '4/3' }}>
+                        border-2 ${statusColor} transition-colors duration-500 mb-6 bg-black aspect-cam`}>
           <Webcam
+            key={cameraKey}
             ref={webcamRef} audio={false} screenshotFormat="image/jpeg"
-            videoConstraints={{ facingMode: 'user', width: 640, height: 480 }}
+            screenshotQuality={0.85}
+            videoConstraints={{
+              facingMode: 'user',
+              width: { ideal: 320 },
+              height: { ideal: 240 },
+            }}
             onUserMedia={() => setCamReady(true)}
-            onUserMediaError={() => setMessage('Camera access denied.')}
+            onUserMediaError={() => {
+              hasScannedRef.current = false
+              setCamReady(false)
+              setStatus('error')
+              setMessage('Camera access denied. Allow camera access and try again.')
+            }}
             className="w-full h-full object-cover"
           />
 
@@ -199,7 +289,28 @@ export default function FaceScanPage() {
             Access denied
           </button>
         )}
-      </motion.div>
+
+        {status === 'error' && (
+          <div className="flex flex-col gap-3">
+            <motion.button
+              type="button"
+              whileTap={{ scale: 0.97 }}
+              onClick={handleCameraRetry}
+              className="btn-primary flex items-center justify-center gap-2"
+            >
+              <Camera className="w-4 h-4" />
+              Retry Camera
+            </motion.button>
+            <button
+              type="button"
+              onClick={() => navigate('/login')}
+              className="btn-ghost flex items-center justify-center gap-2"
+            >
+              Back to Login
+            </button>
+          </div>
+        )}
+      </PageTransition>
     </div>
   )
 }

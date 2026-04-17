@@ -55,10 +55,12 @@ app.add_middleware(
 from routes.auth_routes import router as auth_router
 from routes.vault_routes import router as vault_router
 from routes.user_routes import router as user_router
+from routes.system_routes import router as system_router
 
 app.include_router(auth_router)
 app.include_router(vault_router)
 app.include_router(user_router)
+app.include_router(system_router)
 
 # ── Intruder images (optional static serve, auth-gated in prod) ───────────────
 intruder_dir = Path(__file__).parent / "intruder_images"

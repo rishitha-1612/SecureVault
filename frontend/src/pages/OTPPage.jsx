@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import { Mail, CheckCircle, AlertCircle, RotateCw } from 'lucide-react'
 import { authAPI } from '../api/api'
 import { useAuth } from '../context/AuthContext'
+import PageTransition from '../components/PageTransition'
 
 export default function OTPPage() {
   const navigate              = useNavigate()
@@ -15,10 +16,17 @@ export default function OTPPage() {
   const [loading, setLoading] = useState(false)
   const [resendCd, setResendCd] = useState(0)
   const inputs                = useRef([])
+  const redirectTimeoutRef    = useRef(null)
 
   useEffect(() => {
     if (!sessionId) navigate('/login')
   }, [sessionId, navigate])
+
+  useEffect(() => () => {
+    if (redirectTimeoutRef.current) {
+      clearTimeout(redirectTimeoutRef.current)
+    }
+  }, [])
 
   // Resend cooldown timer
   useEffect(() => {
@@ -43,6 +51,10 @@ export default function OTPPage() {
     if (e.key === 'Backspace' && !digits[i]) focusPrev(i)
     if (e.key === 'ArrowLeft')  focusPrev(i)
     if (e.key === 'ArrowRight') focusNext(i)
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      submit()
+    }
   }
 
   const handlePaste = (e) => {
@@ -64,7 +76,7 @@ export default function OTPPage() {
       const res = await authAPI.verifyOtp({ session_id: sessionId, otp })
       setSuccess(true)
       saveLogin(res.data)
-      setTimeout(() => navigate('/dashboard'), 1200)
+      redirectTimeoutRef.current = setTimeout(() => navigate('/dashboard'), 1200)
     } catch (err) {
       setError(err.response?.data?.detail || 'Invalid or expired OTP.')
       setDigits(['', '', '', '', '', ''])
@@ -92,11 +104,7 @@ export default function OTPPage() {
                         bg-green-500/5 rounded-full blur-3xl" />
       </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 32 }} animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -32 }} transition={{ duration: 0.4 }}
-        className="auth-card relative z-10 text-center"
-      >
+      <PageTransition className="auth-card relative z-10 text-center">
         {/* Icon */}
         <motion.div
           animate={success ? { scale: [1, 1.2, 1] } : {}}
@@ -107,7 +115,7 @@ export default function OTPPage() {
             : <Mail className="w-10 h-10 text-vault-accent" />}
         </motion.div>
 
-        <h1 className="text-xl font-bold mb-1">Email Verification</h1>
+        <h1 className="mb-1 text-xl font-semibold">Email Verification</h1>
         <p className="text-sm text-vault-muted mb-2">Step 3 of 3</p>
         <p className="text-sm text-vault-muted mb-6">
           Enter the 6-digit code sent to your registered email address
@@ -159,7 +167,7 @@ export default function OTPPage() {
         )}
 
         {/* Verify button */}
-        <motion.button whileTap={{ scale: 0.97 }} onClick={submit}
+        <motion.button type="button" whileTap={{ scale: 0.97 }} onClick={submit}
           disabled={loading || success}
           className="btn-primary flex items-center justify-center gap-2 mb-4">
           {loading
@@ -169,13 +177,13 @@ export default function OTPPage() {
         </motion.button>
 
         {/* Resend */}
-        <button onClick={resend} disabled={resendCd > 0}
+        <button type="button" onClick={resend} disabled={resendCd > 0}
           className="flex items-center justify-center gap-1.5 text-sm text-vault-muted
                      hover:text-vault-accent transition-colors disabled:opacity-50 mx-auto">
           <RotateCw className="w-4 h-4" />
           {resendCd > 0 ? `Resend in ${resendCd}s` : 'Resend OTP'}
         </button>
-      </motion.div>
+      </PageTransition>
     </div>
   )
 }

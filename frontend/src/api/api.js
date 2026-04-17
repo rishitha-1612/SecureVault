@@ -1,9 +1,18 @@
 import axios from 'axios'
 
+const AUTH_EVENT = 'securevault:auth-changed'
+
 const api = axios.create({
   baseURL: '/api',
   timeout: 30000,
 })
+
+function clearClientAuth() {
+  localStorage.removeItem('auth')
+  localStorage.removeItem('sv_token')
+  localStorage.removeItem('sv_user')
+  window.dispatchEvent(new Event(AUTH_EVENT))
+}
 
 // Attach JWT token to every request if present
 api.interceptors.request.use((config) => {
@@ -22,9 +31,7 @@ api.interceptors.response.use(
       url.startsWith('/auth/verify-otp')
 
     if (err.response?.status === 401 && !isAuthHandshake) {
-      localStorage.removeItem('sv_token')
-      localStorage.removeItem('sv_user')
-      window.location.href = '/login'
+      clearClientAuth()
     }
     return Promise.reject(err)
   }
@@ -47,6 +54,12 @@ export const authAPI = {
 export const userAPI = {
   dashboard: () => api.get('/user/dashboard'),
   attempts:  () => api.get('/user/attempts'),
+  notifications: () => api.get('/user/notifications'),
+}
+
+// System
+export const systemAPI = {
+  status: () => api.get('/system/status'),
 }
 
 // ── Vault ─────────────────────────────────────────────────────────────────────
@@ -61,4 +74,5 @@ export const vaultAPI = {
   deleteFile: (fileId)   => api.delete(`/vault/delete/${fileId}`),
 }
 
+export { AUTH_EVENT, clearClientAuth }
 export default api

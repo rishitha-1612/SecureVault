@@ -3,6 +3,7 @@ import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Lock, CheckCircle, AlertCircle, Eye, EyeOff, KeyRound, Loader } from 'lucide-react'
 import { authAPI } from '../api/api'
+import PageTransition from '../components/PageTransition'
 
 export default function ResetPasswordPage() {
   const [params]              = useSearchParams()
@@ -65,11 +66,7 @@ export default function ResetPasswordPage() {
                         bg-vault-accent/5 rounded-full blur-3xl" />
       </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 32 }} animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -32 }} transition={{ duration: 0.4 }}
-        className="auth-card relative z-10"
-      >
+      <PageTransition className="auth-card relative z-10">
         {/* Validating */}
         {tokenState === 'validating' && (
           <div className="flex flex-col items-center py-10 gap-4">
@@ -90,7 +87,7 @@ export default function ResetPasswordPage() {
               <h2 className="text-lg font-semibold mb-2">Invalid or Expired Link</h2>
               <p className="text-vault-muted text-sm mb-6">
                 This password reset link is invalid or has expired.
-                Reset links are valid for 1 hour.
+                Reset links are valid for 10 minutes.
               </p>
             </div>
             <div className="flex flex-col gap-2 w-full">
@@ -113,7 +110,7 @@ export default function ResetPasswordPage() {
                 <KeyRound className="w-6 h-6 text-vault-accent" />
               </div>
               <div>
-                <h1 className="text-xl font-bold">Reset Password</h1>
+                <h1 className="text-xl font-semibold">Reset Password</h1>
                 <p className="text-sm text-vault-muted">
                   Setting new password for{' '}
                   <span className="text-vault-accent font-medium">{username}</span>
@@ -217,7 +214,7 @@ export default function ResetPasswordPage() {
             <p className="text-xs text-vault-muted">Redirecting to login in 3 seconds…</p>
           </motion.div>
         )}
-      </motion.div>
+      </PageTransition>
     </div>
   )
 }

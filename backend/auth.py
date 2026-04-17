@@ -438,7 +438,11 @@ def authenticate_face(username: str, image_bytes: bytes,
     if live_encoding is None:
         db.log_attempt(username, "fail", stage="face",
                        location=loc_str, location_dict=location)
-        return AuthResult(False, "No face detected. Look directly at the camera.")
+        return AuthResult(
+            False,
+            "No face detected. Look directly at the camera.",
+            {"trigger_intruder_alert": False},
+        )
 
     if user["face_encoding"] is None:
         return AuthResult(True, "No face on file – face check skipped.")
@@ -452,8 +456,13 @@ def authenticate_face(username: str, image_bytes: bytes,
     img_path = frm.save_intruder_image_from_bytes(image_bytes, username)
     db.log_attempt(username, "intruder", stage="face",
                    location=loc_str, location_dict=location, image_path=img_path)
+    attempt_count = db.count_recent_failures(username, minutes=30)
     return AuthResult(False, "Face does not match records.",
-                      {"image_path": img_path})
+                      {
+                          "image_path": img_path,
+                          "attempt_count": max(1, attempt_count),
+                          "trigger_intruder_alert": True,
+                      })
 
 
 def authenticate_otp(username: str, token: str) -> AuthResult:

@@ -13,7 +13,6 @@ All routes require a valid JWT Bearer token.
 
 import logging
 import mimetypes
-import os
 import uuid
 from pathlib import Path
 from typing import Annotated
@@ -66,9 +65,26 @@ def get_current_user(
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def user_vault_dir(username: str) -> Path:
-    d = VAULT_DIR / username
+    base = VAULT_DIR.resolve()
+    d = (base / username).resolve()
+    if d != base and base not in d.parents:
+        raise HTTPException(400, "Invalid vault path.")
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def vault_file_path(username: str, stored_name: str) -> Path:
+    base = user_vault_dir(username).resolve()
+    path = (base / stored_name).resolve()
+    if path == base or base not in path.parents:
+        raise HTTPException(400, "Invalid file path.")
+    return path
+
+
+def safe_download_name(original_name: str | None) -> str:
+    name = (original_name or "download").replace("\\", "/").split("/")[-1].strip()
+    name = "".join(ch for ch in name if ch not in "\r\n")
+    return name or "download"
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -107,6 +123,7 @@ async def upload_file(
         mime_type    = mime_type,
         file_size    = len(content),
     )
+    file_meta = db.get_vault_file(file_id, username)
     logger.info("Vault upload: user=%s  file=%s  id=%s", username, original_name, file_id)
     return {
         "message":      "File uploaded successfully.",
@@ -114,6 +131,7 @@ async def upload_file(
         "original_name": original_name,
         "file_type":    file_type,
         "file_size":    len(content),
+        "file":         file_meta,
     }
 
 
@@ -127,15 +145,14 @@ async def download_file(
     if not meta:
         raise HTTPException(404, "File not found.")
 
-    path = user_vault_dir(username) / meta["stored_name"]
+    path = vault_file_path(username, meta["stored_name"])
     if not path.exists():
         raise HTTPException(404, "File data not found on disk.")
 
     return FileResponse(
         path         = str(path),
         media_type   = meta["mime_type"] or "application/octet-stream",
-        filename     = meta["original_name"],
-        headers      = {"Content-Disposition": f'attachment; filename="{meta["original_name"]}"'},
+        filename     = safe_download_name(meta["original_name"]),
     )
 
 
@@ -150,7 +167,7 @@ async def delete_file(
         raise HTTPException(404, "File not found.")
 
     # Remove from disk
-    path = user_vault_dir(username) / meta["stored_name"]
+    path = vault_file_path(username, meta["stored_name"])
     if path.exists():
         path.unlink()
 

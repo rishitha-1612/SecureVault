@@ -7,6 +7,7 @@ import {
   CheckCircle, AlertCircle, ArrowLeft, Eye, EyeOff
 } from 'lucide-react'
 import { authAPI } from '../api/api'
+import PageTransition from '../components/PageTransition'
 
 export default function RegisterPage() {
   const navigate  = useNavigate()
@@ -61,17 +62,13 @@ export default function RegisterPage() {
                         bg-vault-accent2/5 rounded-full blur-3xl" />
       </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 32 }} animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -32 }} transition={{ duration: 0.4 }}
-        className="auth-card relative z-10 max-w-lg w-full"
-      >
+      <PageTransition className="auth-card relative z-10 max-w-lg w-full">
         <div className="flex items-center gap-3 mb-7">
           <Link to="/login" className="p-2 rounded-lg hover:bg-vault-card transition">
             <ArrowLeft className="w-5 h-5 text-vault-muted" />
           </Link>
           <div>
-            <h1 className="text-xl font-bold text-vault-text">Create Account</h1>
+            <h1 className="text-xl font-semibold text-vault-text">Create Account</h1>
             <p className="text-sm text-vault-muted">Set up your secure vault</p>
           </div>
         </div>
@@ -212,7 +209,7 @@ export default function RegisterPage() {
           Already have an account?{' '}
           <Link to="/login" className="text-vault-accent hover:underline">Sign in</Link>
         </p>
-      </motion.div>
+      </PageTransition>
     </div>
   )
 }

@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useSearchParams } from 'react-router-dom'
 import {
   AlertCircle,
   Archive,
@@ -21,6 +22,7 @@ import {
 } from 'lucide-react'
 import { vaultAPI } from '../api/api'
 import Card from '../components/Card'
+import PageTransition from '../components/PageTransition'
 import VaultGrid from '../components/VaultGrid'
 
 const CATEGORY_ICONS = {
@@ -32,12 +34,23 @@ const CATEGORY_ICONS = {
   other: { Icon: File, color: 'text-slate-200', bg: 'bg-white/10', border: 'border-white/10' },
 }
 
-const categories = ['all', 'image', 'document', 'video', 'audio', 'archive', 'other']
-const pageTransition = {
-  initial: { opacity: 0, x: 18 },
-  animate: { opacity: 1, x: 0 },
-  exit: { opacity: 0, x: -18 },
-  transition: { duration: 0.35, ease: 'easeOut' },
+const FILTER_CONFIG = {
+  all: { label: 'All Files', Icon: FolderLock },
+  image: { label: 'Images', Icon: Image },
+  document: { label: 'Docs', Icon: FileText },
+  video: { label: 'Videos', Icon: Film },
+  audio: { label: 'Audio', Icon: Music },
+  archive: { label: 'Archive', Icon: Archive },
+  other: { label: 'Other', Icon: File },
+}
+
+const FILE_CARD_ACCENTS = {
+  image: 'card-accent-cyan',
+  document: 'card-accent-emerald',
+  video: 'card-accent-violet',
+  audio: 'card-accent-rose',
+  archive: 'card-accent-amber',
+  other: 'card-accent-slate',
 }
 
 function fmtSize(bytes = 0) {
@@ -47,13 +60,22 @@ function fmtSize(bytes = 0) {
 }
 
 function fmtDate(str) {
-  return new Date(str).toLocaleDateString('en-US', {
+  if (!str) return 'Unknown date'
+  const date = new Date(str)
+  if (Number.isNaN(date.getTime())) return 'Unknown date'
+  return date.toLocaleDateString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit',
   })
 }
 
+function safeDownloadName(name) {
+  const cleaned = (name || 'download').replace(/\\/g, '/').split('/').pop().trim()
+  return cleaned.replace(/[\r\n]/g, '') || 'download'
+}
+
 function FileCard({ file, onDownload, onDelete, downloading, deleting }) {
   const { Icon, color, bg, border } = CATEGORY_ICONS[file.file_type] ?? CATEGORY_ICONS.other
+  const accentClass = FILE_CARD_ACCENTS[file.file_type] ?? FILE_CARD_ACCENTS.other
 
   return (
     <motion.div
@@ -62,7 +84,7 @@ function FileCard({ file, onDownload, onDelete, downloading, deleting }) {
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.92, y: 12 }}
       whileHover={{ y: -5 }}
-      className="glass-card group flex min-h-[190px] flex-col gap-4 p-4"
+      className={`glass-card ${accentClass} group flex min-h-[190px] flex-col gap-4 p-4`}
     >
       <div className="flex items-start gap-3">
         <div className={`grid h-12 w-12 shrink-0 place-items-center rounded-lg border ${bg} ${border}`}>
@@ -109,13 +131,14 @@ function FileCard({ file, onDownload, onDelete, downloading, deleting }) {
 
 function VaultSkeleton() {
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
       {[0, 1, 2, 3, 4, 5, 6, 7].map((item) => <div key={item} className="skeleton h-48" />)}
     </div>
   )
 }
 
 export default function VaultPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [files, setFiles] = useState([])
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -125,14 +148,30 @@ export default function VaultPage() {
   const [downloading, setDownloading] = useState(null)
   const [deleting, setDeleting] = useState(null)
   const [toast, setToast] = useState(null)
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useState(() => searchParams.get('q') || '')
   const [filter, setFilter] = useState('all')
   const [deleteModal, setDeleteModal] = useState(null)
   const fileInput = useRef(null)
+  const toastTimerRef = useRef(null)
 
   const showToast = (msg, type = 'success') => {
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current)
+    }
     setToast({ msg, type })
-    setTimeout(() => setToast(null), 3500)
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null)
+      toastTimerRef.current = null
+    }, 3500)
+  }
+
+  const loadStats = async () => {
+    try {
+      const res = await vaultAPI.stats()
+      setStats(res.data)
+    } catch {
+      // Keep the current summary if a refresh fails after an otherwise successful action.
+    }
   }
 
   const loadData = async () => {
@@ -149,8 +188,64 @@ export default function VaultPage() {
 
   useEffect(() => { loadData() }, [])
 
+  useEffect(() => {
+    setSearch(searchParams.get('q') || '')
+  }, [searchParams])
+
+  useEffect(() => () => {
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current)
+    }
+  }, [])
+
+  const handleSearchChange = (event) => {
+    const value = event.target.value
+    setSearch(value)
+
+    const nextParams = new URLSearchParams(searchParams)
+    if (value.trim()) {
+      nextParams.set('q', value)
+    } else {
+      nextParams.delete('q')
+    }
+    setSearchParams(nextParams, { replace: true })
+  }
+
+  const openFilePicker = () => {
+    if (!fileInput.current || uploading) return
+    fileInput.current.value = ''
+    fileInput.current.click()
+  }
+
+  const syncUploadedFile = (uploadedFile) => {
+    if (!uploadedFile?.id) return
+
+    setFiles((prev) => {
+      const alreadyTracked = prev.some((item) => item.id === uploadedFile.id)
+
+      setStats((prevStats) => {
+        if (alreadyTracked) {
+          return prevStats
+        }
+
+        const totalBytes = (prevStats?.total_bytes ?? 0) + (uploadedFile.file_size ?? 0)
+        const byType = { ...(prevStats?.by_type || {}) }
+        byType[uploadedFile.file_type] = (byType[uploadedFile.file_type] || 0) + 1
+
+        return {
+          total_files: (prevStats?.total_files ?? prev.length) + 1,
+          total_bytes: totalBytes,
+          total_mb: Number((totalBytes / 1_000_000).toFixed(2)),
+          by_type: byType,
+        }
+      })
+
+      return [uploadedFile, ...prev.filter((item) => item.id !== uploadedFile.id)]
+    })
+  }
+
   const uploadFile = async (file) => {
-    if (!file) return
+    if (!file || uploading) return
     setUploading(true)
     setUploadPct(0)
     const formData = new FormData()
@@ -160,9 +255,10 @@ export default function VaultPage() {
     }
 
     try {
-      await vaultAPI.upload(formData)
+      const res = await vaultAPI.upload(formData)
+      syncUploadedFile(res.data?.file)
+      void loadStats()
       showToast(`"${file.name}" uploaded successfully.`)
-      await loadData()
     } catch (err) {
       showToast(err.response?.data?.detail || 'Upload failed.', 'error')
     } finally {
@@ -172,23 +268,34 @@ export default function VaultPage() {
     }
   }
 
-  const handleUpload = (e) => uploadFile(e.target.files?.[0])
+  const handleUpload = (e) => {
+    const selectedFile = e.target.files?.[0]
+    if (selectedFile) {
+      void uploadFile(selectedFile)
+    }
+  }
 
   const handleDrop = (e) => {
     e.preventDefault()
     setDragging(false)
-    uploadFile(e.dataTransfer.files?.[0])
+    const droppedFile = e.dataTransfer.files?.[0]
+    if (droppedFile) {
+      void uploadFile(droppedFile)
+    }
   }
 
   const handleDownload = async (file) => {
     setDownloading(file.id)
     try {
       const res = await vaultAPI.download(file.id)
-      const url = URL.createObjectURL(new Blob([res.data]))
+      const blob = res.data instanceof Blob ? res.data : new Blob([res.data])
+      const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = file.original_name
+      link.download = safeDownloadName(file.original_name)
+      document.body.appendChild(link)
       link.click()
+      link.remove()
       URL.revokeObjectURL(url)
       showToast(`"${file.original_name}" downloaded.`)
     } catch {
@@ -209,7 +316,18 @@ export default function VaultPage() {
         ...prev,
         total_files: Math.max(0, (prev.total_files || 1) - 1),
         total_bytes: Math.max(0, (prev.total_bytes || 0) - deleteModal.file_size),
-        total_mb: Math.max(0, ((prev.total_bytes || 0) - deleteModal.file_size) / 1e6).toFixed(2),
+        total_mb: Number((Math.max(0, ((prev.total_bytes || 0) - deleteModal.file_size) / 1e6)).toFixed(2)),
+        by_type: Object.entries(prev.by_type || {}).reduce((next, [type, count]) => {
+          if (type === deleteModal.file_type) {
+            const remaining = Math.max(0, count - 1)
+            if (remaining > 0) {
+              next[type] = remaining
+            }
+          } else {
+            next[type] = count
+          }
+          return next
+        }, {}),
       } : prev)
     } catch {
       showToast('Delete failed.', 'error')
@@ -225,8 +343,15 @@ export default function VaultPage() {
     return matchCat && matchQ
   }), [files, filter, search])
 
+  const filterCounts = useMemo(() => (
+    Object.keys(FILTER_CONFIG).reduce((acc, key) => ({
+      ...acc,
+      [key]: key === 'all' ? files.length : files.filter((file) => file.file_type === key).length,
+    }), {})
+  ), [files])
+
   return (
-    <motion.div {...pageTransition} className="space-y-6">
+    <PageTransition className="space-y-6">
       <section className="hero-panel p-5 sm:p-6">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-4">
@@ -238,12 +363,12 @@ export default function VaultPage() {
                 <ShieldCheck className="h-3.5 w-3.5" />
                 Encrypted storage
               </div>
-              <h1 className="mt-2 text-3xl font-bold text-white sm:text-4xl">Secure Vault</h1>
+              <h1 className="mt-2 text-3xl font-semibold text-white sm:text-4xl">Secure Vault</h1>
               <p className="mt-2 text-sm text-vault-muted">Drop files into a hardened workspace with quick filters and encrypted retrieval.</p>
             </div>
           </div>
-          <input ref={fileInput} type="file" onChange={handleUpload} className="hidden" accept="*/*" />
-          <button type="button" onClick={() => fileInput.current?.click()} disabled={uploading} className="ripple-button group w-full justify-center sm:w-auto">
+          <input ref={fileInput} type="file" onChange={handleUpload} className="hidden" accept="*/*" tabIndex={-1} />
+          <button type="button" onClick={openFilePicker} disabled={uploading} className="ripple-button group w-full justify-center sm:w-auto">
             {uploading ? <span className="spinner-small border-white/50" /> : <Upload className="h-4 w-4" />}
             {uploading ? `Uploading ${uploadPct}%` : 'Upload File'}
             <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
@@ -255,6 +380,15 @@ export default function VaultPage() {
         <Card hover={false} className={`drop-zone p-5 ${dragging ? 'drop-zone-active' : ''}`}>
           <div
             className="flex h-full min-h-44 flex-col items-center justify-center rounded-lg border border-dashed border-cyan-300/30 bg-cyan-300/[0.04] p-6 text-center"
+            role="button"
+            tabIndex={0}
+            onClick={openFilePicker}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                openFilePicker()
+              }
+            }}
             onDragEnter={(e) => { e.preventDefault(); setDragging(true) }}
             onDragOver={(e) => e.preventDefault()}
             onDragLeave={(e) => { e.preventDefault(); setDragging(false) }}
@@ -276,7 +410,7 @@ export default function VaultPage() {
           </div>
         </Card>
 
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
           {[
             { icon: HardDrive, label: 'Total Files', val: stats?.total_files ?? files.length, color: 'text-cyan-300' },
             { icon: HardDrive, label: 'Storage Used', val: `${stats?.total_mb ?? 0} MB`, color: 'text-sky-300' },
@@ -289,7 +423,7 @@ export default function VaultPage() {
           ].map(({ icon: Icon, label, val, color }, index) => (
             <Card key={label} delay={0.04 * index} className="p-4">
               <Icon className={`mb-4 h-5 w-5 ${color}`} />
-              <div className="text-2xl font-bold text-white">{val}</div>
+              <div className="text-2xl font-semibold text-white">{val}</div>
               <div className="mt-1 text-xs text-vault-muted">{label}</div>
             </Card>
           ))}
@@ -299,12 +433,21 @@ export default function VaultPage() {
       <section className="flex flex-col gap-3 lg:flex-row lg:items-center">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-cyan-200/60" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search encrypted files" className="vault-input pl-10" />
+          <input value={search} onChange={handleSearchChange} placeholder="Search encrypted files" className="vault-input pl-10" />
         </div>
         <div className="flex gap-2 overflow-x-auto pb-1">
-          {categories.map((cat) => (
-            <button key={cat} type="button" onClick={() => setFilter(cat)} className={`filter-chip ${filter === cat ? 'filter-chip-active' : ''}`}>
-              {cat.charAt(0).toUpperCase() + cat.slice(1)}
+          {Object.entries(FILTER_CONFIG).map(([key, { label, Icon }]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setFilter(key)}
+              className={`filter-chip whitespace-nowrap ${filter === key ? 'filter-chip-active' : ''}`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              <span>{label}</span>
+              <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-white/70">
+                {filterCounts[key] ?? 0}
+              </span>
             </button>
           ))}
         </div>
@@ -320,7 +463,7 @@ export default function VaultPage() {
           <p className="mt-5 font-semibold text-white">{search || filter !== 'all' ? 'No files match your filters' : 'Your vault is empty'}</p>
           <p className="mt-2 text-sm text-vault-muted">{search || filter !== 'all' ? 'Try a different search or file type.' : 'Upload your first encrypted file.'}</p>
           {!search && filter === 'all' && (
-            <button type="button" onClick={() => fileInput.current?.click()} className="secondary-action mt-5">
+            <button type="button" onClick={openFilePicker} className="secondary-action mt-5">
               <Plus className="h-4 w-4" />
               Upload First File
             </button>
@@ -376,6 +519,6 @@ export default function VaultPage() {
           </motion.div>
         )}
       </AnimatePresence>
-    </motion.div>
+    </PageTransition>
   )
 }

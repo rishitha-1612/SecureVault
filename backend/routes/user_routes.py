@@ -4,6 +4,7 @@ routes/user_routes.py
 Protected user data endpoints:
   GET  /api/user/dashboard  - dashboard summary + login history
   GET  /api/user/attempts   - full login attempt history
+  GET  /api/user/notifications - intruder alerts + login attempts
 """
 
 import logging
@@ -58,3 +59,23 @@ async def dashboard(username: Annotated[str, Depends(get_current_user)]):
 async def login_history(username: Annotated[str, Depends(get_current_user)]):
     attempts = db.get_recent_attempts(username, limit=50)
     return {"attempts": attempts, "count": len(attempts)}
+
+
+@router.get("/notifications")
+async def notifications(username: Annotated[str, Depends(get_current_user)]):
+    attempts = db.get_recent_attempts(username, limit=50)
+    intruder_alerts = [
+        item for item in attempts
+        if item.get("status") == "intruder" or (
+            item.get("status") == "fail" and (item.get("attempt_no") or 0) >= auth.MAX_ATTEMPTS
+        )
+    ]
+
+    return {
+        "intruder_alerts": intruder_alerts,
+        "login_attempts": attempts,
+        "counts": {
+            "intruder_alerts": len(intruder_alerts),
+            "login_attempts": len(attempts),
+        },
+    }

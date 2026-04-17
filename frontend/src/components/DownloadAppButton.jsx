@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Download, X, Smartphone } from 'lucide-react'
+import { useLocation } from 'react-router-dom'
+
+const INSTALL_PROMPT_DISMISS_KEY = 'sv_install_hidden'
 
 function isStandalone() {
   return window.matchMedia?.('(display-mode: standalone)').matches ||
@@ -8,10 +11,17 @@ function isStandalone() {
 }
 
 export default function DownloadAppButton() {
+  const location = useLocation()
   const [installPrompt, setInstallPrompt] = useState(null)
   const [installed, setInstalled] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
-  const [hidden, setHidden] = useState(() => localStorage.getItem('sv_install_hidden') === '1')
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(INSTALL_PROMPT_DISMISS_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
 
   const deviceHint = useMemo(() => {
     const ua = navigator.userAgent || ''
@@ -30,14 +40,24 @@ export default function DownloadAppButton() {
     const onBeforeInstallPrompt = (event) => {
       event.preventDefault()
       setInstallPrompt(event)
-      setHidden(false)
-      localStorage.removeItem('sv_install_hidden')
+      setDismissed(false)
+      try {
+        localStorage.removeItem(INSTALL_PROMPT_DISMISS_KEY)
+      } catch {
+        // Ignore storage failures and continue showing the install prompt.
+      }
     }
 
     const onInstalled = () => {
       setInstalled(true)
       setInstallPrompt(null)
       setShowHelp(false)
+      setDismissed(false)
+      try {
+        localStorage.removeItem(INSTALL_PROMPT_DISMISS_KEY)
+      } catch {
+        // Ignore storage failures after install.
+      }
     }
 
     window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt)
@@ -63,12 +83,20 @@ export default function DownloadAppButton() {
   }
 
   const dismiss = () => {
-    setHidden(true)
     setShowHelp(false)
-    localStorage.setItem('sv_install_hidden', '1')
+    setInstallPrompt(null)
+    setDismissed(true)
+    try {
+      localStorage.setItem(INSTALL_PROMPT_DISMISS_KEY, '1')
+    } catch {
+      // Ignore storage failures and still dismiss for this session.
+    }
   }
 
-  if (installed || hidden) return null
+  const hideOnAuthBridgeScreens = location.pathname === '/face-scan' ||
+    location.pathname === '/verify-otp'
+
+  if (installed || dismissed || hideOnAuthBridgeScreens) return null
 
   return (
     <AnimatePresence>
@@ -76,31 +104,32 @@ export default function DownloadAppButton() {
         initial={{ opacity: 0, y: 18 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 18 }}
-        className="fixed bottom-4 right-4 z-[70] w-[min(92vw,330px)]"
+        transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+        className="fixed bottom-4 right-4 z-[70] w-[min(92vw,360px)]"
       >
-        <div className="rounded-lg border border-white/15 bg-vault-panel/90 p-3 shadow-2xl backdrop-blur-xl">
+        <motion.div whileHover={{ y: -4 }} className="download-card">
           <div className="flex items-start gap-3">
-            <div className="rounded-lg bg-vault-accent/20 p-2 text-vault-accent">
+            <div className="download-chip">
               <Smartphone className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold text-vault-text">Download SecureVault</div>
+              <div className="text-sm font-semibold text-vault-text">Install SecureVault</div>
               <p className="mt-1 text-xs leading-5 text-vault-muted">
-                Install on laptops and phones for faster access.
+                Pin the dashboard for faster encrypted access on desktop and mobile.
               </p>
             </div>
             <button
               type="button"
               onClick={dismiss}
-              className="rounded-md p-1 text-vault-muted transition hover:bg-white/10 hover:text-vault-text"
-              aria-label="Dismiss download app prompt"
+              className="rounded-xl p-1.5 text-vault-muted transition hover:bg-white/10 hover:text-vault-text"
+              aria-label="Dismiss install app prompt"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
 
           {showHelp && (
-            <p className="mt-3 rounded-md border border-vault-border bg-black/20 p-2 text-xs leading-5 text-vault-text">
+            <p className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3 text-xs leading-5 text-vault-text">
               {deviceHint}
             </p>
           )}
@@ -108,12 +137,12 @@ export default function DownloadAppButton() {
           <button
             type="button"
             onClick={install}
-            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-vault-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-purple-600"
+            className="download-button mt-3"
           >
             <Download className="h-4 w-4" />
-            Download App
+            Install App
           </button>
-        </div>
+        </motion.div>
       </motion.div>
     </AnimatePresence>
   )

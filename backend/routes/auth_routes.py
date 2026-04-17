@@ -24,6 +24,7 @@ Key upgrades in this version:
 import base64
 import logging
 import secrets as _sec
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
@@ -213,24 +214,23 @@ async def login(body: LoginRequest, request: Request):
                 try:
                     img_bytes         = _b64_to_bytes(body.intruder_image)
                     intruder_img_path = frm.save_intruder_image_from_bytes(img_bytes, username)
-                    logger.info("Intruder webcam snapshot saved: %s", intruder_img_path)
+                    if intruder_img_path:
+                        db.update_attempt_image(username, "password", new_count, intruder_img_path)
+                        logger.info("Intruder webcam snapshot saved: %s", intruder_img_path)
                 except Exception as exc:
                     logger.error("Failed to save intruder webcam image: %s", exc)
 
             if user:
-                try:
-                    es.send_intruder_alert(
-                        user["email"], username, new_count,
-                        location, intruder_img_path, ua
-                    )
-                finally:
-                    _remove_temp_intruder_image(intruder_img_path)
+                event_time = datetime.now(timezone.utc).strftime("%d %B %Y at %H:%M:%S UTC")
+                es.send_intruder_alert(
+                    user["email"], username, new_count,
+                    location, intruder_img_path, ua,
+                    event_time=event_time,
+                )
                 logger.warning(
                     "INTRUDER ALERT sent for user=%s after %d failed attempts. "
                     "Location=%s", username, new_count, location.get("display")
                 )
-            else:
-                _remove_temp_intruder_image(intruder_img_path)
 
             # Lock for 30 seconds, then reset counter
             db.set_lockout(username, seconds=auth.LOCKOUT_SECONDS)
@@ -288,21 +288,21 @@ async def face_verify(body: FaceVerifyRequest, request: Request):
 
     if not result:
         # ── FACE INTRUDER: image was already saved inside authenticate_face ──
+        should_alert = bool(result.data.get("trigger_intruder_alert"))
         user = db.get_user(username)
-        if user:
+        if should_alert and user:
             img_path = result.data.get("image_path")
-            try:
-                es.send_intruder_alert(
-                    user["email"], username, 1,
-                    location, img_path, session.get("ua", "Unknown")
-                )
-            finally:
-                _remove_temp_intruder_image(img_path)
+            event_time = datetime.now(timezone.utc).strftime("%d %B %Y at %H:%M:%S UTC")
+            es.send_intruder_alert(
+                user["email"], username, max(1, int(result.data.get("attempt_count") or 1)),
+                location, img_path, session.get("ua", "Unknown"),
+                event_time=event_time,
+            )
             logger.warning(
                 "FACE INTRUDER ALERT sent for user=%s. Location=%s image=%s",
                 username, location.get("display"), img_path
             )
-        raise HTTPException(401, result.message)
+        raise HTTPException(403 if should_alert else 400, result.message)
 
     # Advance stage and send OTP
     session["stage"] = "face"

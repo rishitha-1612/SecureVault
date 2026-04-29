@@ -14,6 +14,7 @@ export default function FaceScanPage() {
   const webcamRef = useRef(null)
   const hasScannedRef = useRef(false)
   const redirectIntervalRef = useRef(null)
+  const scanTimeoutRef = useRef(null)
 
   const [status, setStatus] = useState('idle')
   const [message, setMessage] = useState('')
@@ -31,6 +32,9 @@ export default function FaceScanPage() {
     primeBrowserLocation()
 
     return () => {
+      if (scanTimeoutRef.current) {
+        window.clearTimeout(scanTimeoutRef.current)
+      }
       if (redirectIntervalRef.current) {
         window.clearInterval(redirectIntervalRef.current)
       }
@@ -49,7 +53,7 @@ export default function FaceScanPage() {
       return
     }
 
-    const screenshot = webcamRef.current?.getScreenshot({ width: 320, height: 240 })
+    const screenshot = webcamRef.current?.getScreenshot()
     if (!screenshot) {
       setStatus('error')
       setMessage('Could not capture image. Return to login and try again.')
@@ -108,7 +112,7 @@ export default function FaceScanPage() {
     setCamReady(false)
     setCountdown(null)
     setStatus('idle')
-    setMessage('')
+    setMessage('Center your face in the frame. Capturing in a moment...')
   }, [])
 
   useEffect(() => {
@@ -127,12 +131,16 @@ export default function FaceScanPage() {
     }
 
     if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
-      void scan()
+      scanTimeoutRef.current = window.setTimeout(() => {
+        void scan()
+      }, 900)
       return
     }
 
     const handleLoadedData = () => {
-      void scan()
+      scanTimeoutRef.current = window.setTimeout(() => {
+        void scan()
+      }, 900)
     }
 
     video.addEventListener('loadeddata', handleLoadedData, { once: true })
@@ -179,11 +187,11 @@ export default function FaceScanPage() {
               ref={webcamRef}
               audio={false}
               screenshotFormat="image/jpeg"
-              screenshotQuality={0.85}
+              screenshotQuality={0.95}
               videoConstraints={{
                 facingMode: 'user',
-                width: { ideal: 320 },
-                height: { ideal: 240 },
+                width: { ideal: 640 },
+                height: { ideal: 480 },
               }}
               onUserMedia={handleUserMedia}
               onUserMediaError={() => {
@@ -251,9 +259,21 @@ export default function FaceScanPage() {
         )}
 
         {(status === 'error' || status === 'blocked') && (
-          <button type="button" onClick={() => navigate('/login', { replace: true })} className={status === 'blocked' ? 'btn-danger flex items-center justify-center gap-2' : 'btn-ghost flex items-center justify-center gap-2'}>
-            {status === 'blocked' ? 'Access denied' : 'Back to Login'}
-          </button>
+          <div className="flex flex-col gap-3">
+            {status === 'error' && (
+              <button
+                type="button"
+                onClick={startCamera}
+                className="btn-primary flex items-center justify-center gap-2"
+              >
+                <Camera className="h-4 w-4" />
+                Try Again
+              </button>
+            )}
+            <button type="button" onClick={() => navigate('/login', { replace: true })} className={status === 'blocked' ? 'btn-danger flex items-center justify-center gap-2' : 'btn-ghost flex items-center justify-center gap-2'}>
+              {status === 'blocked' ? 'Access denied' : 'Back to Login'}
+            </button>
+          </div>
         )}
       </PageTransition>
     </div>

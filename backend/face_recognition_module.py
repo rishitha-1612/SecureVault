@@ -17,9 +17,10 @@ import face_recognition as fr
 
 logger        = logging.getLogger(__name__)
 INTRUDER_DIR  = Path(__file__).parent / "intruder_images"
-TOLERANCE     = 0.50
-DETECTION_SIZE = (320, 240)
+TOLERANCE = 0.50
+DETECTION_SIZE = (640, 480)
 DETECTION_MODEL = "hog"
+DETECTION_UPSAMPLE = 1
 
 
 def _bytes_to_frame(image_bytes: bytes) -> np.ndarray | None:
@@ -36,6 +37,12 @@ def _bytes_to_frame(image_bytes: bytes) -> np.ndarray | None:
 def _prepare_detection_frame(frame: np.ndarray) -> np.ndarray:
     """Resize frames before face detection to keep authentication responsive."""
     try:
+        height, width = frame.shape[:2]
+        target_width, target_height = DETECTION_SIZE
+
+        if width <= target_width and height <= target_height:
+            return frame
+
         return cv2.resize(frame, DETECTION_SIZE, interpolation=cv2.INTER_AREA)
     except Exception as exc:
         logger.warning("_prepare_detection_frame resize fallback: %s", exc)
@@ -53,7 +60,11 @@ def get_face_encoding_from_bytes(image_bytes: bytes) -> list | None:
             return None
         detection_frame = _prepare_detection_frame(frame)
         rgb       = cv2.cvtColor(detection_frame, cv2.COLOR_BGR2RGB)
-        locations = fr.face_locations(rgb, number_of_times_to_upsample=0, model=DETECTION_MODEL)
+        locations = fr.face_locations(
+            rgb,
+            number_of_times_to_upsample=DETECTION_UPSAMPLE,
+            model=DETECTION_MODEL,
+        )
         if not locations:
             return None
         encodings = fr.face_encodings(rgb, locations)
@@ -107,7 +118,11 @@ def draw_face_boxes_on_bytes(image_bytes: bytes) -> bytes:
         frame  = _bytes_to_frame(image_bytes)
         detection_frame = _prepare_detection_frame(frame)
         rgb    = cv2.cvtColor(detection_frame, cv2.COLOR_BGR2RGB)
-        locs   = fr.face_locations(rgb, number_of_times_to_upsample=0, model=DETECTION_MODEL)
+        locs = fr.face_locations(
+            rgb,
+            number_of_times_to_upsample=DETECTION_UPSAMPLE,
+            model=DETECTION_MODEL,
+        )
         for top, right, bottom, left in locs:
             cv2.rectangle(detection_frame, (left, top), (right, bottom), (0, 220, 0), 2)
         _, buf = cv2.imencode(".jpg", detection_frame)
